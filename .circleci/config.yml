@@ -37,11 +37,19 @@ install_aws_cli: &install_aws_cli
 
 install_ghr: &install_ghr
   run:
-    name: "Install ghr"
+    name: Install ghr (Github Releases)
     command: |
       wget https://github.com/tcnksm/ghr/releases/download/v0.9.0/ghr_v0.9.0_linux_amd64.tar.gz
       tar xf ghr_v0.9.0_linux_amd64.tar.gz
       ln -sf ghr_v0.9.0_linux_amd64/ghr .
+
+sync_dl_cache: &sync_dl_cache
+  run: 
+    name: Sync downloads cache
+    command: |
+      set +e
+      aws s3 sync ~/.nerves/dl s3://nerves-project/dl
+      exit 0
 
 version: 2.0
 
@@ -56,31 +64,27 @@ jobs:
       - run:
           name: Install dependencies
           command: mix deps.get
-      - restore_cache:
-          key: nerves/cache-{{ .Environment.CIRCLE_PROJECT_USERNAME}}-{{ .Environment.CIRCLE_PROJECT_REPONAME}}
       - run:
           name: Build
           command: mix compile
       - run:
-          name: "Did I really build"
+          name: Did I really build
           command: |
             [ -d /nerves/build/.nerves ] || (echo "VERSION file needs to be bumped or a config file needs to change to force a build"; exit 1)
       - run:
           name: Lint
           command: mix nerves.system.lint nerves_defconfig
-      - save_cache:
-          key: nerves/dl-{{ .Environment.CIRCLE_PROJECT_USERNAME}}-{{ .Environment.CIRCLE_PROJECT_REPONAME}}
-          paths:
-            - "/nerves/dl"
+      - <<: *install_aws_cli
+      - <<: *sync_dl_cache
       - run:
-          name: "Create artifact dir"
+          name: Create artifact dir
           command: mkdir -p /nerves/deploy/system/artifacts
       - run:
-          name: "Copy CHANGELOG"
+          name: Copy CHANGELOG
           command: cp ./CHANGELOG.md /nerves/deploy/system/CHANGELOG.md
 
       - run:
-          name: "Create artifacts"
+          name: Create artifacts
           command: |
             if [ -n "$CIRCLE_TAG" ]; then
               TAG=$CIRCLE_TAG
@@ -119,7 +123,7 @@ jobs:
           name: Create test firmware
           command: mix firmware
       - run:
-          name: "Create artifact dir"
+          name: Create artifact dir
           command: mkdir -p /nerves/deploy/test/artifacts
       - run:
           name: Create build context
@@ -136,7 +140,7 @@ jobs:
             --ci-build-url $CIRCLE_BUILD_URL
             --ci-build-num $CIRCLE_BUILD_NUM
       - run:
-          name: "Sign test fw artifact"
+          name: Sign test fw artifact
           command: fwup --sign --private-key $NERVES_FW_PRIV_KEY -i /nerves/build/test/_build/test/nerves/images/test.fw -o /nerves/deploy/test/artifacts/${CIRCLE_SHA1}.fw
       - store_artifacts:
           path: /nerves/deploy/test/artifacts
@@ -149,9 +153,9 @@ jobs:
   deploy_test:
     <<: *defaults
     steps:
+      - <<: *install_aws_cli
       - restore_cache:
           key: nerves/deploy/test-{{ .Revision }}-{{ .Environment.CIRCLE_TAG }}
-      - <<: *install_aws_cli
       - deploy:
           name: Publish notification on SNS
           command: aws sns publish --topic-arn $AWS_SNS_TOPIC_ARN --message "$(cat /nerves/deploy/test/artifacts/${CIRCLE_SHA1}.json)"
@@ -163,10 +167,10 @@ jobs:
           key: nerves/deploy/system-{{ .Revision }}-{{ .Environment.CIRCLE_TAG }}
       - <<: *install_ghr
       - run:
-          name: "Create Release Notes"
+          name: Create release notes
           command: grep -Pazo "(?s)(?<=## ${CIRCLE_TAG})[^#]+" /nerves/deploy/system/CHANGELOG.md | sed '/./,$!d' > /nerves/deploy/system/RELEASE_NOTES
       - run:
-          name: "Deploy artifacts to Github"
+          name: Deploy artifacts to Github
           command: ./ghr -draft -t $GITHUB_TOKEN -u $CIRCLE_PROJECT_USERNAME -r $CIRCLE_PROJECT_REPONAME -b "$(cat /nerves/deploy/system/RELEASE_NOTES)" -replace $CIRCLE_TAG /nerves/deploy/system/artifacts
 
 workflows:
