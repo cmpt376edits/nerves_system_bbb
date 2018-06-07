@@ -223,4 +223,11 @@ CONFIG_USB_CDC_COMPOSITE=y
 
 ## Serial ports
 
+## Remote control support
 
+Linux has IR remote control support enabled by default, but this is probably not
+a common use case for Nerves devices.
+
+```config
+# CONFIG_RC_CORE is not set
+```
